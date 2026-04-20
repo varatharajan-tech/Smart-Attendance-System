@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import * as XLSX from 'xlsx';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell,
 } from "recharts";
+import { apiClient } from './src/api.js';
 
 // ─── GLOBAL STYLES ────────────────────────────────────────────────────────────
 const GLOBAL_CSS = `
@@ -80,12 +82,6 @@ const CALL_STATUS = [
   { name: "Picked", value: 58, color: "#22C55E" },
   { name: "Not Picked", value: 24, color: "#EF4444" },
   { name: "Retry", value: 18, color: "#F59E0B" },
-];
-
-// Auth credentials
-const AUTH_USERS = [
-  { email: "admin@rvs.edu", password: "admin123", role: "Admin" },
-  { email: "teacher@rvs.edu", password: "teacher123", role: "Teacher" },
 ];
 
 // ─── UTILS ────────────────────────────────────────────────────────────────────
@@ -222,21 +218,46 @@ function LoginPage({ onLogin }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showPw, setShowPw] = useState(false);
+  const emailRef = useRef(null);
+  const passwordRef = useRef(null);
+
+  useEffect(() => {
+    const syncAutofill = () => {
+      if (emailRef.current?.value) setEmail(emailRef.current.value);
+      if (passwordRef.current?.value) setPassword(passwordRef.current.value);
+    };
+
+    syncAutofill();
+    const timer = window.setTimeout(syncAutofill, 100);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const handleLogin = async () => {
     setError("");
     if (!email || !password) { setError("Please fill in all fields."); return; }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 1100));
-    const user = AUTH_USERS.find(u => u.email === email && u.password === password && u.role === role);
+
+    const result = await apiClient.login(email, password, role);
     setLoading(false);
-    if (user) { onLogin(user); }
-    else { setError("Invalid credentials or role mismatch. Try again."); }
+
+    if (result.success) {
+      apiClient.setToken(result.data.token);
+      onLogin(result.data.user);
+    } else {
+      setError(result.error || "Invalid credentials. Try again.");
+    }
   };
 
   const demoFill = (r) => {
-    const u = AUTH_USERS.find(x => x.role === r);
-    setEmail(u.email); setPassword(u.password); setRole(r); setError("");
+    if (r === "Admin") {
+      setEmail("admin@rvs.edu");
+      setPassword("admin123");
+    } else {
+      setEmail("teacher@rvs.edu");
+      setPassword("teacher123");
+    }
+    setRole(r);
+    setError("");
   };
 
   return (
@@ -252,7 +273,7 @@ function LoginPage({ onLogin }) {
         <div className="relative z-10 flex flex-col h-full p-14 justify-between">
           {/* Top logo */}
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 bg-white/15 backdrop-blur rounded-2xl flex items-center justify-center border border-white/20 text-white font-black text-sm">RVS</div>
+            <img src="/rvs-logo.png" alt="RVS Campus Logo" className="w-12 h-12 object-contain" />
             <div>
               <div className="text-white font-bold text-sm">RVS Technical Campus</div>
               <div className="text-blue-300 text-xs">Coimbatore</div>
@@ -294,7 +315,7 @@ function LoginPage({ onLogin }) {
         <div className="w-full max-w-sm animate-fade-up">
           {/* Mobile logo */}
           <div className="flex items-center gap-3 mb-8 lg:hidden">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-black text-sm">RVS</div>
+            <img src="/rvs-logo.png" alt="RVS Campus Logo" className="w-10 h-10 object-contain" />
             <div className="text-slate-800 font-bold">Smart Attendance System</div>
           </div>
 
@@ -314,21 +335,36 @@ function LoginPage({ onLogin }) {
           </div>
 
           {/* Form */}
-          <div className="space-y-4">
+          <form className="space-y-4" onSubmit={e => { e.preventDefault(); handleLogin(); }}>
             <div>
-              <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide block mb-1.5">Email</label>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+              <label htmlFor="login-email" className="text-xs font-semibold text-slate-600 uppercase tracking-wide block mb-1.5">Email</label>
+              <input
+                id="login-email"
+                name="email"
+                ref={emailRef}
+                type="email"
+                value={email}
+                autoComplete="username"
+                onChange={e => setEmail(e.target.value)}
                 placeholder={role === "Admin" ? "admin@rvs.edu" : "teacher@rvs.edu"}
-                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition-all" />
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition-all"
+              />
             </div>
             <div>
-              <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide block mb-1.5">Password</label>
+              <label htmlFor="login-password" className="text-xs font-semibold text-slate-600 uppercase tracking-wide block mb-1.5">Password</label>
               <div className="relative">
-                <input type={showPw ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)}
+                <input
+                  id="login-password"
+                  name="password"
+                  ref={passwordRef}
+                  type={showPw ? "text" : "password"}
+                  value={password}
+                  autoComplete="current-password"
+                  onChange={e => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  onKeyDown={e => e.key === "Enter" && handleLogin()}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition-all pr-12" />
-                <button onClick={() => setShowPw(!showPw)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition-all pr-12"
+                />
+                <button type="button" onClick={() => setShowPw(!showPw)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-sm">
                   {showPw ? "🙈" : "👁️"}
                 </button>
@@ -341,13 +377,13 @@ function LoginPage({ onLogin }) {
               </div>
             )}
 
-            <button onClick={handleLogin} disabled={loading}
+            <button type="submit" disabled={loading}
               className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-70 text-white font-semibold rounded-xl transition-all duration-150 flex items-center justify-center gap-2 shadow-sm shadow-blue-200 mt-2">
               {loading
                 ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Signing in…</>
                 : `Sign in as ${role}`}
             </button>
-          </div>
+          </form>
 
           {/* Demo quick-fill */}
           <div className="mt-6 pt-6 border-t border-slate-200">
@@ -392,12 +428,9 @@ function CollegeBanner({ user }) {
       <div className="relative z-10 p-7 flex items-center justify-between">
         {/* Left: Logo + Name */}
         <div className="flex items-center gap-5">
-          {/* College Logo placeholder */}
-          <div className="w-16 h-16 rounded-2xl bg-white flex items-center justify-center shadow-lg shrink-0 border-2 border-white/30">
-            <div className="text-center">
-              <div className="text-blue-700 font-black text-sm leading-none">RVS</div>
-              <div className="text-slate-500 text-[8px] font-semibold">GROUP</div>
-            </div>
+          {/* College Logo */}
+          <div className="w-16 h-16 rounded-2xl bg-white flex items-center justify-center shadow-lg shrink-0 border-2 border-white/30 p-1">
+            <img src="/rvs-logo.png" alt="RVS Campus Logo" className="w-full h-full object-contain" />
           </div>
           <div>
             <h1 className="text-white font-extrabold text-xl leading-tight tracking-tight">
@@ -446,7 +479,7 @@ function Sidebar({ active, setActive, user, onLogout }) {
       {/* Logo */}
       <div className="px-5 py-5 border-b border-slate-800">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center text-white font-black text-xs shrink-0">RVS</div>
+          <img src="/rvs-logo.png" alt="RVS Campus Logo" className="w-9 h-9 object-contain shrink-0" />
           <div>
             <div className="text-white font-bold text-sm leading-tight">RVS Campus</div>
             <div className="text-slate-400 text-xs">Attendance System</div>
@@ -571,17 +604,17 @@ function DashboardPage({ addToast, user }) {
   const [dashboardData, setDashboardData] = useState(null);
 
   useEffect(() => {
-    fetch('http://localhost:5000/api/dashboard')
-      .then(res => res.json())
-      .then(data => {
-        setDashboardData(data);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error(err);
-        setLoading(false);
-      });
-  }, []);
+    const fetchData = async () => {
+      const result = await apiClient.getDashboard();
+      if (result.success) {
+        setDashboardData(result.data);
+      } else {
+        addToast(`Failed to fetch dashboard: ${result.error}`, "error");
+      }
+      setLoading(false);
+    };
+    fetchData();
+  }, [addToast]);
 
   return (
     <div className="space-y-5">
@@ -741,12 +774,17 @@ function AttendancePage({ addToast }) {
 
   useEffect(() => {
     if (selectedDept && selectedYear) {
-      fetch(`http://localhost:5000/api/students?dept=${encodeURIComponent(selectedDept.name)}&year=${encodeURIComponent(selectedYear)}`)
-        .then(res => res.json())
-        .then(data => setStudents(data.map(s => ({ ...s, id: s._id, status: 'present' }))))
-        .catch(err => addToast("Failed to fetch students", "error"));
+      const fetchStudents = async () => {
+        const result = await apiClient.getStudents(selectedDept.name, selectedYear);
+        if (result.success) {
+          setStudents(result.data.map(s => ({ ...s, id: s._id, status: 'present' })));
+        } else {
+          addToast(`Failed to fetch students: ${result.error}`, "error");
+        }
+      };
+      fetchStudents();
     }
-  }, [selectedDept, selectedYear]);
+  }, [selectedDept, selectedYear, addToast]);
 
   const STEPS = ["Select Department", "Select Year", "Mark Attendance"];
 
@@ -767,16 +805,13 @@ function AttendancePage({ addToast }) {
         year: selectedYear,
         records: students.map(s => ({ student: s.id, status: s.status }))
       };
-      const res = await fetch("http://localhost:5000/api/attendance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
+      const result = await apiClient.saveAttendance(payload);
       setSaving(false);
-      addToast(`Attendance saved! ${data.absenteesCount} absent.`, "success");
-      if (data.alertsSent > 0) {
-        addToast(`Alerts queued for ${data.alertsSent} absentees via Twilio`, "info");
+
+      if (result.success) {
+        addToast(`Attendance saved! ${result.data.absenteesCount} absent.`, "success");
+      } else {
+        addToast(`Failed to save attendance: ${result.error}`, "error");
       }
     } catch (err) {
       setSaving(false);
@@ -944,13 +979,15 @@ function AlertsPage({ addToast }) {
     if (!type) { addToast("Please select an alert type", "warning"); return; }
     setSending(true);
     try {
-      await fetch("http://localhost:5000/api/alerts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: type.id, message: msg, channels: ['sms', 'voice'] })
-      });
+      const result = await apiClient.sendAlert("+1234567890", msg);
       setSending(false);
-      addToast(`${type.label} processed via Twilio backend!`, "success");
+
+      if (result.success) {
+        addToast(`${type.label} alert queued successfully!`, "success");
+        setMsg(type.template);
+      } else {
+        addToast(`Failed to send alert: ${result.error}`, "error");
+      }
     } catch (e) {
       setSending(false);
       addToast("Failed to send alerts", "error");
@@ -1257,8 +1294,15 @@ function ParentsPage({ addToast }) {
   const [editModal, setEditModal] = useState(false);
   const [editStudent, setEditStudent] = useState(null);
   const [deleteModal, setDeleteModal] = useState(false);
+  const [importedStudents, setImportedStudents] = useState([]);
+  const [importErrors, setImportErrors] = useState("");
+  const [isSavingImported, setIsSavingImported] = useState(false);
+  const fileInputRef = useRef(null);
 
-  const parents = STUDENTS.map(s => ({ ...s, parentName: s.parent }));
+  const parents = [...STUDENTS, ...importedStudents].map(s => ({
+    ...s,
+    parentName: s.parent || s.parentName,
+  }));
   const filtered = parents.filter(p =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||
     p.parentName.toLowerCase().includes(search.toLowerCase()) ||
@@ -1270,7 +1314,61 @@ function ParentsPage({ addToast }) {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <SectionHeader title="Parent Data Management" subtitle="Student and parent contact information" />
         <div className="flex gap-2">
-          <button onClick={() => addToast("Excel import opened!", "info")}
+          <input type="file" accept=".xlsx,.xls,.csv" ref={fileInputRef} onChange={async e => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const data = await file.arrayBuffer();
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+            if (!rows.length) {
+              setImportErrors("Excel file contains no rows.");
+              addToast("Excel file is empty or has no readable rows.", "error");
+              e.target.value = "";
+              return;
+            }
+
+            const imported = rows.map((row, index) => {
+              const normalized = Object.keys(row).reduce((acc, key) => {
+                acc[key.trim().toLowerCase()] = row[key];
+                return acc;
+              }, {});
+
+              const name = normalized['student name'] || normalized['name'] || normalized['student'] || "";
+              const roll = normalized['roll number'] || normalized['roll no.'] || normalized['roll'] || "";
+              const parentName = normalized['parent name'] || normalized['parent'] || "";
+              const phone = normalized['parent phone'] || normalized['contact'] || normalized['phone'] || "";
+              const dept = normalized['department'] || normalized['dept'] || "B.Tech AI & Data Science";
+              const year = normalized['year'] || normalized['class'] || "2nd Year";
+
+              return {
+                id: `import-${Date.now()}-${index}`,
+                name: String(name).trim(),
+                roll: String(roll).trim(),
+                parent: String(parentName).trim(),
+                parentName: String(parentName).trim(),
+                phone: String(phone).trim(),
+                status: "present",
+                dept,
+                year,
+              };
+            }).filter(item => item.name && item.roll && item.parent && item.phone);
+
+            if (!imported.length) {
+              setImportErrors("No valid student records found in the Excel file.");
+              addToast("No valid student rows found in the Excel file.", "error");
+              e.target.value = "";
+              return;
+            }
+
+            setImportedStudents(imported);
+            setImportErrors("");
+            addToast(`${imported.length} student record(s) imported from Excel.`, "success");
+            e.target.value = "";
+          }} style={{ display: 'none' }} />
+
+          <button onClick={() => fileInputRef.current?.click()}
             className="px-4 py-2.5 border-2 border-slate-200 text-slate-700 text-sm font-bold rounded-xl hover:border-blue-300 hover:text-blue-700 transition-all flex items-center gap-2">
             📤 Import Excel
           </button>
@@ -1280,6 +1378,41 @@ function ParentsPage({ addToast }) {
           </button>
         </div>
       </div>
+      {importErrors && (
+        <div className="mt-3 px-4 py-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm">
+          {importErrors}
+        </div>
+      )}
+      {importedStudents.length > 0 && (
+        <div className="mt-3 px-4 py-3 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-sm flex items-center justify-between">
+          <span>{importedStudents.length} imported student record(s) loaded from Excel. You can search or edit them below.</span>
+          <button onClick={async () => {
+            setIsSavingImported(true);
+            let saved = 0;
+            for (const student of importedStudents) {
+              const result = await apiClient.createStudent({
+                name: student.name,
+                roll: student.roll,
+                dept: student.dept,
+                year: student.year,
+                parent: student.parent,
+                phone: student.phone,
+              });
+              if (result.success) saved++;
+            }
+            setIsSavingImported(false);
+            if (saved === importedStudents.length) {
+              addToast(`✅ All ${saved} students saved to database successfully!`, "success");
+              setImportedStudents([]);
+            } else {
+              addToast(`⚠️ Saved ${saved}/${importedStudents.length} students. Some failed.`, "warning");
+            }
+          }} disabled={isSavingImported}
+            className="px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-all flex items-center gap-2 shrink-0">
+            {isSavingImported ? <>⏳ Saving...</> : <>💾 Save to Database</>}
+          </button>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
@@ -1490,7 +1623,12 @@ export default function App() {
   const { toasts, addToast, removeToast } = useToast();
 
   const handleLogin = (u) => { setUser(u); addToast(`Welcome back, ${u.role}! 👋`, "success"); };
-  const handleLogout = () => { setUser(null); setPage("dashboard"); addToast("Logged out successfully.", "info"); };
+  const handleLogout = () => {
+    apiClient.clearToken();
+    setUser(null);
+    setPage("dashboard");
+    addToast("Logged out successfully.", "info");
+  };
 
   if (!user) {
     return (
